@@ -710,6 +710,17 @@ def conv1d_transpose_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
+@einsum_strategy.register(["cuda", "gpu"])
+def einsum_strategy_cuda(attrs, inputs, out_type, target):
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_einsum(topi.einsum),
+        naive_schedule,
+        name="einsum.cuda",
+    )
+    return strategy
+
+
 @matmul_strategy.register(["cuda", "gpu"])
 def matmul_strategy_cuda(attrs, inputs, out_type, target):
     """Matmul cuda strategy."""

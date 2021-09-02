@@ -18,7 +18,7 @@
 """Neural network operations."""
 from tvm.relay import expr
 
-from ...expr import Constant, Expr, const
+from ...expr import Constant, Expr, const, Tuple
 from ..dyn.nn import _make as _dyn_make
 from . import _make
 from .utils import get_pad_tuple1d, get_pad_tuple2d, get_pad_tuple3d
@@ -1469,6 +1469,32 @@ def bias_add(data, bias, axis=1):
         The final result.
     """
     return _make.bias_add(data, bias, axis)
+
+
+def einsum(subscripts, a_tuple):
+    """Einsum operator
+    Evaluates the Einstein summation convention on the operands
+    
+    Parameters
+    ----------
+    subscripts : str
+        Specifies the subscripts for summation as comma separated list
+        of subscript labels. An implicit (classical Einstein summation)
+        calculation is performed unless the explicit indicator '->' is 
+        included as well as subscript labels of the precise output form.
+    
+    a_tuple : Tuple[relay.Expr]
+        These are the Tensors for the operation. The only difference of 
+        einsum between in tvm and numpy is it needs an extra brackets
+        for the tensors. For example, einsum("ij,jk->ik",(A,B))
+    
+    Returns
+    -------
+    result : tvm.relay.Expr
+        The computed result.
+    """
+    a_tuple = list(a_tuple)
+    return _make.einsum(subscripts, Tuple(a_tuple))
 
 
 def matmul(tensor_a, tensor_b, units=None, out_dtype="", transpose_a=False, transpose_b=False):

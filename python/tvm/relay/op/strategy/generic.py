@@ -715,6 +715,32 @@ def dilation2d_strategy(attrs, inputs, out_type, target):
     return strategy
 
 
+# Einsum
+def wrap_compute_einsum(topi_compute, need_auto_scheduler_layout=False):
+    def _compute_einsum(attrs, inputs, _):
+        args = [
+            attrs.subscripts,
+            *inputs
+        ]
+        if need_auto_scheduler_layout:
+            args.append(get_auto_scheduler_rewritten_layout(attrs))
+        return [topi_compute(*args)]
+    
+    return _compute_einsum
+
+
+@override_native_generic_func("einsum_strategy")
+def einsum_strategy(attrs, inputs, out_type, target):
+    logger.warning("einsum is not optimized for this platform.")
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_einsum(topi.einsum),
+        wrap_topi_schedule(topi.generic.schedule_einsum),
+        name="einsum.generic",
+    )
+    return strategy
+    
+
 # matmul
 def wrap_compute_matmul(topi_compute, need_auto_scheduler_layout=False):
     """wrap matmul topi compute"""

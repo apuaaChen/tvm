@@ -580,6 +580,25 @@ def schedule_fast_softmax(outs):
     return _default_schedule(outs, False)
 
 
+def schedule_einsum(outs):
+    """Schedule for einsum
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+          The computation graph description of einsum
+          in the format of an array of tensors.
+
+    Returns
+    -------
+    sch: Schedule
+        The computation schedule for the op.
+    """
+    return _default_schedule(outs, False)
+
+
+
+
 def schedule_matmul(outs):
     """Schedule for matmul
 

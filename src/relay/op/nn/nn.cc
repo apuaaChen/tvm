@@ -162,6 +162,27 @@ Useful for
     .set_support_level(3)
     .add_type_rel("FIFOBuffer", FIFOBufferRel);
 
+// ------------------- relay.nn.einsum
+TVM_REGISTER_NODE_TYPE(EinsumAttrs);
+
+RELAY_REGISTER_OP("nn.einsum")
+    .describe(R"code(Applies a Einstein Summation)code" TVM_ADD_FILELINE)
+    .set_attrs_type<EinsumAttrs>()
+    .set_num_inputs(1)
+    .add_argument("a_tuple", "tuple of Tensors", "the tensors for the operation")
+    .set_support_level(3)
+    .add_type_rel("Einsum", EinsumRel<EinsumAttrs>)
+    .set_attr<TOpPattern>("TOpPattern", kOpaque);
+
+Expr MakeEinsum(std::string subscripts, Expr data){
+  auto attrs = make_object<EinsumAttrs>();
+  attrs->subscripts = subscripts;
+  static const Op& einsum_op = Op::Get("nn.einsum");
+  return Call(einsum_op, {data}, Attrs(attrs), {});
+}
+
+TVM_REGISTER_GLOBAL("relay.op.nn._make.einsum").set_body_typed(MakeEinsum);
+
 // ------------------- relay.nn.matmul
 TVM_REGISTER_NODE_TYPE(MatmulAttrs);
 

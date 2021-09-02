@@ -1468,7 +1468,7 @@ class PyTorchOpConverter:
         if isinstance(bias, _expr.Expr):
             bias_ndims = len(self.infer_shape_with_prelude(bias))
             if bias_ndims == 1:
-                return _op.nn.bias_add(mm_out, bias)
+                return _op.nn.bias_add(mm_out, bias, axis=-1)
             mm_dtype = self.infer_type_with_prelude(mm_out).dtype
             return self.add([mm_out, bias], [mm_dtype, input_types[2]])
         return mm_out
@@ -1609,6 +1609,9 @@ class PyTorchOpConverter:
             indeces.append(i)
 
         return _op.split(data, indeces, axis)
+    
+    def einsum(self, inputs, input_types):
+        return _op.nn.einsum(*inputs)
 
     def matmul(self, inputs, input_types):
 
@@ -2766,6 +2769,7 @@ class PyTorchOpConverter:
     # Operator mappings
     def create_convert_map(self):
         self.convert_map = {
+            "aten::einsum": self.einsum,
             "aten::is_floating_point": self.is_floating_point,
             "aten::pixel_shuffle": self.pixel_shuffle,
             "aten::device": self.none,

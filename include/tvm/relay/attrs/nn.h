@@ -987,6 +987,20 @@ struct MatmulAttrs : public tvm::AttrsNode<MatmulAttrs> {
   }
 };
 
+/*! \brief Attributes for Einsum */
+struct EinsumAttrs : public tvm::AttrsNode<EinsumAttrs> {
+    std::string subscripts;
+    tvm::String auto_scheduler_rewritten_layout;
+
+    TVM_DECLARE_ATTRS(EinsumAttrs, "relay.attrs.EinsumAttrs") {
+        TVM_ATTR_FIELD(subscripts).describe(
+            "Specifies the subscripts for summation as comma separated list of subscript labels."
+            "An implicit (classical Einstein summation) calculation is performed unless the "
+            "explicit indicator '->' is included as well as subscript labels of the precise output form."
+        );
+    }
+};
+
 /*! \brief Attributes for dense operator */
 struct DenseAttrs : public tvm::AttrsNode<DenseAttrs> {
   IndexExpr units;

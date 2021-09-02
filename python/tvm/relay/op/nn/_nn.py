@@ -51,6 +51,14 @@ reg.register_pattern("nn.fast_softmax", OpPattern.OPAQUE)
 reg.register_strategy("nn.log_softmax", strategy.log_softmax_strategy)
 reg.register_pattern("nn.log_softmax", OpPattern.OPAQUE)
 
+# einsum
+@reg.register_compute("nn.einsum")
+def compute_einsum(attrs, inputs, output_type):
+    return [topi.einsum(attrs.subscripts, inputs[1])]
+    
+reg.register_strategy("nn.einsum", strategy.einsum_strategy)
+reg.register_shape_func("nn.einsum", reg.OpPattern.OUT_ELEMWISE_FUSABLE)
+
 
 @reg.register_legalize("nn.matmul")
 def legalize_matmul(attrs, inputs, types):
