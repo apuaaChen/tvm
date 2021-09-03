@@ -445,6 +445,20 @@ String State::ToStr(bool delete_trivial_loop) const {
   return os.str();
 }
 
+String State::PrintStage_(int stage_id, bool delete_trivial_loop) const {
+  std::ostringstream os;
+  if ((*this)->stages[stage_id]->op_type == StageKind::kPlaceholder){
+    os<<"Placeholder: ";
+    os<<(*this)->stages[stage_id]->op->name;
+    os<<"\n";
+  } else if ((*this)->stages[stage_id]->op_type == StageKind::kCompute){
+    PrintStage(&os, stage_id, (*this), 0, delete_trivial_loop);
+  } else {
+    LOG(FATAL) << "Invalid op type";
+  }
+  return os.str();
+}
+
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<StageNode>([](const ObjectRef& ref, ReprPrinter* p) {
       const auto& stage = tvm::Downcast<Stage>(ref);

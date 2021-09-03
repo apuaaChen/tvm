@@ -285,6 +285,8 @@ class State : public ObjectRef {
    */
   String ToStr(bool delete_trivial_loop = true) const;
 
+  String PrintStage_(int stage_id, bool delete_trivial_loop = true) const;
+
   /********** Step APIs working on a single stage **********/
   /*!
    * \brief The schedule primitive corresponding to `te::Stage::bind`.
