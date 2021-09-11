@@ -29,6 +29,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include "sketch_policy.h"
 
@@ -380,6 +381,7 @@ std::vector<std::pair<State, int>> RuleCrossThreadReduction::Apply(const SketchP
   bool fusible = false;
   int target_stage_id = GetSingleConsumerId(policy.search_task, tmp_s, stage_id);
   int num_common_outer = -1;
+  int factor_axis_id = static_cast<int>(space_iters.size());
   if (target_stage_id >= 0) {
     num_common_outer =
         GetNumCommonOuterIterator(policy.search_task, tmp_s, stage_id, target_stage_id);
@@ -413,9 +415,19 @@ std::vector<std::pair<State, int>> RuleCrossThreadReduction::Apply(const SketchP
     tmp_s.bind(stage_id, split_res[1], IteratorAnnotation::kThreadX);
     tmp_s.compute_at(stage_id, target_stage_id, target_iter);
   } else {
-    const auto& split_res =
-        tmp_s.split(stage_id, fused_reduce_iter, {Integer(task->hardware_params->warp_size)});
-    tmp_s.bind(stage_id, split_res[1], IteratorAnnotation::kThreadX);
+    // Step 1: split the fused_reduce_iter to outer & inner. 
+    // The warp reduction will be applied to the inner iterator
+    const auto& split_res = tmp_s.split(stage_id, fused_reduce_iter, {Integer(task->hardware_params->warp_size)});
+    // Step 2: use rfactor to parallel the reduction
+    tmp_s.rfactor(stage_id, split_res[1], factor_axis_id, policy.search_task->compute_dag);
+    // Step 3: bind threadIdx
+    tmp_s.bind(stage_id+1, tmp_s->stages[stage_id+1]->iters[factor_axis_id], IteratorAnnotation::kThreadX);
+    // Compute at
+    tmp_s.compute_at(stage_id, stage_id+1, tmp_s->stages[stage_id+1]->iters[factor_axis_id]);
+    // Infer the loop bound
+    tmp_s = policy.search_task->compute_dag.InferBound(tmp_s);
+    const auto& split_res_2 = tmp_s.split(stage_id, tmp_s->stages[stage_id]->iters[factor_axis_id+1], {Integer(1)}, false);
+    tmp_s.bind(stage_id, tmp_s->stages[stage_id]->iters[factor_axis_id+1], IteratorAnnotation::kThreadY);
   }
 
   return {std::make_pair(std::move(tmp_s), stage_id - 1)};
