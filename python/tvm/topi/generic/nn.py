@@ -749,6 +749,10 @@ def schedule_lrn(outs):
     return _default_schedule(outs, False)
 
 
+def schedule_layer_norm(outs):
+    return _default_schedule(outs, False)
+
+
 def schedule_sparse_dense(outs):
     """Schedule for sparse_dense
 

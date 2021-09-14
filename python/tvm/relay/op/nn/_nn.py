@@ -620,6 +620,15 @@ reg.register_schedule("nn.lrn", strategy.schedule_lrn)
 reg.register_pattern("nn.lrn", OpPattern.OPAQUE)
 
 
+# layernorm
+@reg.register_compute("nn.layer_norm")
+def compute_layer_norm(attrs, inputs, output_type):
+    return [topi.nn.layer_norm(inputs[0], inputs[1], inputs[2], attrs.axis, attrs.epsilon, attrs.center, attrs.scale)]
+
+reg.register_strategy("nn.layer_norm", strategy.layer_norm_strategy)
+reg.register_shape_func("nn.layer_norm", OpPattern.OPAQUE)
+
+
 # upsampling
 @reg.register_compute("nn.upsampling")
 def compute_upsampling(attrs, inputs, out_dtype):

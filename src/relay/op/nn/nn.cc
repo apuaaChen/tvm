@@ -929,7 +929,8 @@ RELAY_REGISTER_OP("nn.layer_norm")
     .add_argument("gamma", "Tensor", "The gamma scale factor.")
     .add_argument("beta", "Tensor", "The beta offset factor.")
     .set_support_level(1)
-    .add_type_rel("LayerNorm", LayerNormRel);
+    .add_type_rel("LayerNorm", LayerNormRel)
+    .set_attr<TOpPattern>("TOpPattern", kOpaque);
 
 // group_norm
 TVM_REGISTER_NODE_TYPE(GroupNormAttrs);

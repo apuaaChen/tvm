@@ -199,6 +199,33 @@ def schedule_lrn(attrs, outs, target):
     with target:
         return topi.generic.schedule_lrn(outs)
 
+# layer norm
+def wrap_compute_layer_norm(topi_compute, need_auto_scheduler_layout=False):
+    def _compute_layer_norm(attrs, inputs, _):
+        args = [
+            inputs[0],
+            inputs[1],
+            inputs[2],
+            attrs.axis,
+            attrs.epsilon,
+            attrs.center,
+            attrs.scale
+        ]
+        if need_auto_scheduler_layout:
+            args.append(get_auto_scheduler_rewritten_layout(attrs))
+        return [topi_compute(*args)]
+    return _compute_layer_norm
+
+@override_native_generic_func("layer_norm_strategy")
+def layer_norm_strategy(attrs, inputs, out_type, target):
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_layer_norm(topi.nn.layer_norm),
+        wrap_topi_schedule(topi.generic.schedule_layer_norm),
+        name="layer_norm.generic",
+    )
+    return strategy
+
 
 # bitpack
 @generic_func

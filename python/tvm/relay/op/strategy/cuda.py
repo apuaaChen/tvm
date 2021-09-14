@@ -127,6 +127,17 @@ def schedule_lrn_cuda(attrs, outs, target):
         return topi.cuda.schedule_lrn(outs)
 
 
+@layer_norm_strategy.register(["cuda", "gpu"])
+def layer_norm_strategy_cuda(attrs, inputs, out_type, target):
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_layer_norm(topi.nn.layer_norm),
+        naive_schedule,
+        name="layer_norm.cuda",
+    )
+    return strategy
+
+
 @conv2d_strategy.register(["cuda", "gpu"])
 def conv2d_strategy_cuda(attrs, inputs, out_type, target):
     """conv2d cuda strategy"""
