@@ -65,6 +65,8 @@ class CodeGenSourceBase {
   void ClearFuncState();
   /*! \brief print the current indented value */
   void PrintIndent();
+    /*! \brief print the current indented value */
+  void PrintIndent(std::ostream& os, int d);
   /*!
    * \brief Allocate a variable name for a newly defined var.
    * \param v The variable.

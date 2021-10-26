@@ -686,6 +686,27 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     os << ", ";
     this->PrintExpr(op->args[6], os);
     os << ")";
+    if (op->dtype == DataType::Float(32)){
+      os << "; \n";
+      os << "#pragma unroll\n";
+      PrintIndent(os, 0);
+      os << "for (int t = 0; t < ";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[4], os);
+      os << "].num_elements; t++) { \n";
+      PrintIndent(os, 2);
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[4], os);
+      os << "].x[t] = nvcuda::wmma::__float_to_tf32(";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[4], os);
+      os << "].x[t]);\n";
+      PrintIndent(os, 0);
+      os << "}";
+    }
   } else if (op->op.same_as(builtin::tvm_store_matrix_sync())) {
     need_mma_h_ = true;
     ICHECK_EQ(op->args.size(), 8U);
@@ -770,8 +791,8 @@ void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
       ICHECK(op->dtype == DataType::Float(16) || op->dtype == DataType::Int(8) ||
              op->dtype == DataType::UInt(8) || op->dtype == DataType::Int(4) ||
              op->dtype == DataType::UInt(4) || op->dtype == DataType::Int(1) ||
-             op->dtype == DataType::BFloat(16))
-          << "Matrix_a and matrix_b only support half or char or unsigned char "
+             op->dtype == DataType::BFloat(16) || op->dtype == DataType::Float(32))  // Add float for A100 tensor core
+          << "Matrix_a and matrix_b only support float, half or char or unsigned char "
           << "or uint4 or int4 or int1 type for now";
     } else {
       ICHECK(op->dtype == DataType::Float(16) || op->dtype == DataType::Float(32) ||
@@ -1033,7 +1054,10 @@ void CodeGenCUDA::PrintWmmaScope(const std::string& scope, DataType t, const Var
   std::stringstream type;
   PrintType(t, type);
   std::string shape_str = fragment_shapes[variable];
-  if ((t.is_int() || t.is_uint()) && t.bits() < 8 && t.lanes() == 1) {
+  if (t.is_float() && scope != "wmma.accumulator"){
+    type.str(std::string());
+    type << "nvcuda::wmma::precision::tf32";
+  } else if ((t.is_int() || t.is_uint()) && t.bits() < 8 && t.lanes() == 1) {
     type.str(std::string());
     if (t.is_int()) {
       if (t.bits() == 4) {
