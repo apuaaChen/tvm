@@ -703,6 +703,23 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       LOG(FATAL) << "Invalid parameters";
     }
     os << ")";
+  } else if (op->op.same_as(builtin::my_tvm_store_matrix_sync())){
+    need_mma_h_ = true;
+    ICHECK_EQ(op->args.size(), 8U);
+    os << "nvcuda::wmma::store_matrix_sync(";
+    this->PrintExpr(op->args[5], os);
+    os << ", ";
+    this->PrintExpr(op->args[0], os);
+    os << "[";
+    this->PrintExpr(op->args[4], os);
+    os << "], ";
+    this->PrintExpr(op->args[6], os);
+    if (const StringImmNode* str = op->args[7].as<StringImmNode>()) {
+      os << ", nvcuda::wmma::mem_" << str->value;
+    } else {
+      LOG(FATAL) << "Invalid parameters";
+    }
+    os << ")";
   } else if (op->op.same_as(builtin::tvm_mma_sync())) {
     need_mma_h_ = true;
     ICHECK_EQ(op->args.size(), 8U);

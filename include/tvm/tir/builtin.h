@@ -580,6 +580,14 @@ TVM_DLL const Op& tvm_fill_fragment();
  */
 TVM_DLL const Op& tvm_store_matrix_sync();
 
+
+/*!
+ * \brief my own tvm intrinsic for tensor core.
+ *   just check the steps required to extend the intrinsics
+ *
+ */
+TVM_DLL const Op& my_tvm_store_matrix_sync();
+
 // TODO(tvm-team) replace the usage of the vector operations by Shuffle.
 /*!
  * \brief Get the high level half of the vector
