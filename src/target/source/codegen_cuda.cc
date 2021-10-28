@@ -676,16 +676,52 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     os << ")";
   } else if (op->op.same_as(builtin::tvm_load_matrix_sync())) {
     need_mma_h_ = true;
-    ICHECK_EQ(op->args.size(), 8U);
-    os << "nvcuda::wmma::load_matrix_sync(";
-    this->PrintExpr(op->args[0], os);
-    os << "[";
-    this->PrintExpr(op->args[4], os);
-    os << "], ";
-    this->PrintExpr(op->args[5], os);
-    os << ", ";
-    this->PrintExpr(op->args[6], os);
-    os << ")";
+    ICHECK_GE(op->args.size(), 8U);
+    ICHECK_LE(op->args.size(), 9U);
+    if ((op->args.size() == 9U) && (op->args[8].as<StringImmNode>()->value == "ldmatrix")){
+      os << "float* s_pointer = reinterpret_cast<float* >(";
+      this->PrintExpr(op->args[5], os);
+      if (op->args[7].as<StringImmNode>()->value == "row_major"){
+        os << "+ (threadIdx.x & 15) * ";
+        this->PrintExpr(op->args[6], os);
+        os << ") + ((threadIdx.x & 16) >>2);\n";
+      } else {
+        os << " + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
+        this->PrintExpr(op->args[6], os);
+        os << ") + ((threadIdx.x & 8)>>1);\n";
+      }
+      PrintIndent(os, 0);
+      os << "unsigned s_pointer_t = __nv_cvta_generic_to_shared_impl((void*) s_pointer); \n";
+      PrintIndent(os, 0);
+      os << "int* a_int = reinterpret_cast<int*>(";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[4], os);
+      os << "].x);\n";
+      PrintIndent(os, 0);
+
+      std::stringstream scope;
+      this->PrintExpr(op->args[0], scope);
+      if ((op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)) && 
+          (op->args[7].as<StringImmNode>()->value == "row_major") &&
+          (scope.str().find("matrix_b") != std::string::npos)){
+        os << "asm volatile (\"ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 ";
+      }
+      else {
+        os << "asm volatile (\"ldmatrix.sync.aligned.m8n8.x4.shared.b16 ";
+      }
+      os << "{%0, %1, %2, %3}, [%4];\" : \"=r\"(a_int[0]), \"=r\"(a_int[1]), \"=r\"(a_int[2]), \"=r\"(a_int[3]): \"r\"(s_pointer_t))";
+    } else {
+      os << "nvcuda::wmma::load_matrix_sync(";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[4], os);
+      os << "], ";
+      this->PrintExpr(op->args[5], os);
+      os << ", ";
+      this->PrintExpr(op->args[6], os);
+      os << ")";
+    }
     if (op->dtype == DataType::Float(32)){
       os << "; \n";
       os << "#pragma unroll\n";
@@ -1054,7 +1090,7 @@ void CodeGenCUDA::PrintWmmaScope(const std::string& scope, DataType t, const Var
   std::stringstream type;
   PrintType(t, type);
   std::string shape_str = fragment_shapes[variable];
-  if (t.is_float() && scope != "wmma.accumulator"){
+  if (t.is_float() && t.bits() > 16 && scope != "wmma.accumulator"){
     type.str(std::string());
     type << "nvcuda::wmma::precision::tf32";
   } else if ((t.is_int() || t.is_uint()) && t.bits() < 8 && t.lanes() == 1) {

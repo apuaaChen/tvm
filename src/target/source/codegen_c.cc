@@ -990,7 +990,10 @@ void CodeGenC::VisitStmt_(const EvaluateNode* op) {
   std::string vid = this->PrintExpr(op->value);
   if (vid != "") {
     this->PrintIndent();
-    this->stream << "(void)" << vid << ";\n";
+    if (vid.find("=") == std::string::npos)
+      this->stream << "(void)" << vid << ";\n";
+    else
+      this->stream << vid << ";\n";
   }
 }
 
