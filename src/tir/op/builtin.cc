@@ -222,6 +222,9 @@ TIR_DEFINE_BUILTIN_FUNC(tvm_thread_allreduce)
 TIR_DEFINE_BUILTIN_FUNC(tvm_load_matrix_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kReadState));
 
+TIR_DEFINE_BUILTIN_FUNC(tvm_load_shared)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kReadState));
+
 TIR_DEFINE_BUILTIN_FUNC(tvm_mma_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

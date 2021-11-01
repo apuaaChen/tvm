@@ -674,21 +674,109 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     os << "], ";
     this->PrintExpr(op->args[5], os);
     os << ")";
+  } else if (op->op.same_as(builtin::tvm_load_shared())) {
+    if (op->args[4].as<StringImmNode>()->value == "linear"){
+      os << "*(reinterpret_cast<float4*>(";
+      this->PrintExpr(op->args[1], os);
+      os << " + ((threadIdx.x & 24) >> 3) * ";
+      this->PrintExpr(op->args[3], os);
+      os << ") + (threadIdx.x & 7)) = *(reinterpret_cast<float4*>(";
+      this->PrintExpr(op->args[0], os);
+      os << " + ((threadIdx.x & 24) >> 3) * ";
+      this->PrintExpr(op->args[2], os);
+      os << ") + (threadIdx.x & 7))";
+    } else if (op->args[4].as<StringImmNode>()->value == "xor"){
+      os << "*(reinterpret_cast<float4*>(";
+      this->PrintExpr(op->args[1], os);
+      os << " + ((threadIdx.x & 24) >> 3) * ";
+      this->PrintExpr(op->args[3], os);
+      os << ") + ((threadIdx.x & 7) ^ (((threadIdx.x & 24) >> 3) + ((threadIdx.y & 1) << 2)))) = *(reinterpret_cast<float4*>(";
+      this->PrintExpr(op->args[0], os);
+      os << " + ((threadIdx.x & 24) >> 3) * ";
+      this->PrintExpr(op->args[2], os);
+      os << ") + (threadIdx.x & 7))";
+    }
   } else if (op->op.same_as(builtin::tvm_load_matrix_sync())) {
     need_mma_h_ = true;
     ICHECK_GE(op->args.size(), 8U);
-    ICHECK_LE(op->args.size(), 9U);
-    if ((op->args.size() == 9U) && (op->args[8].as<StringImmNode>()->value == "ldmatrix")){
-      os << "float* s_pointer = reinterpret_cast<float* >(";
+    /*
+     * Case 1: no modifiers are provided. 
+     *         The original "wmma::load_matrix_sync" is used
+     */
+    if (op->args.size() == 8U){
+      os << "nvcuda::wmma::load_matrix_sync(";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[4], os);
+      os << "], ";
       this->PrintExpr(op->args[5], os);
-      if (op->args[7].as<StringImmNode>()->value == "row_major"){
-        os << "+ (threadIdx.x & 15) * ";
-        this->PrintExpr(op->args[6], os);
-        os << ") + ((threadIdx.x & 16) >>2);\n";
-      } else {
-        os << " + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
-        this->PrintExpr(op->args[6], os);
-        os << ") + ((threadIdx.x & 8)>>1);\n";
+      os << ", ";
+      this->PrintExpr(op->args[6], os);
+      os << ")";
+    } else {
+      os << "float* s_pointer = reinterpret_cast<float* >(";
+      /* 
+       * Case 2: a single modifier is provided.
+       *         When "xor" is set, the ldmatrix must also be set
+       *         So this case stands for ldmatrix with linear layout
+       */
+      if ((op->args.size() == 9U) && 
+          (op->args[8].as<StringImmNode>()->value == "ldmatrix")
+      ){
+        this->PrintExpr(op->args[5], os);
+        if (op->args[7].as<StringImmNode>()->value == "row_major"){
+          os << "+ (threadIdx.x & 15) * ";
+          this->PrintExpr(op->args[6], os);
+          os << ") + ((threadIdx.x & 16) >>2)";
+          os << ";\n";
+        } else {
+          os << " + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
+          this->PrintExpr(op->args[6], os);
+          os << ") + ((threadIdx.x & 8)>>1);\n";
+        }
+      }
+      /*
+      * Case 3: two or more modifiers are provided.
+      *         This could be ldmatrix + xor
+      */
+      else if ((op->args.size() == 10U) &&
+              (op->args[8].as<StringImmNode>()->value == "ldmatrix") &&
+              (op->args[9].as<StringImmNode>()->value == "xor")
+      ){
+        std::stringstream shm_ptr;
+        this->PrintExpr(op->args[5].as<CallNode>()->args[0], shm_ptr);
+        int start = 0;
+        int end = 0;
+        for (size_t i=0; i < shm_ptr.str().length(); i++){
+          if (shm_ptr.str()[i] == '[') start = i+1;
+          if (shm_ptr.str()[i] == ']') {
+            end = i;
+            break;
+          }
+        }
+        std::string index = shm_ptr.str().substr(start, end - start);
+        std::string var = shm_ptr.str().substr(0, start-1);
+        if (op->args[7].as<StringImmNode>()->value == "row_major") {
+          if (op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)){
+            os << var << "+ ((" << index << "+ ((threadIdx.x & 16) >> 1) + (threadIdx.x & 15) * ";
+            this->PrintExpr(op->args[6], os);
+            os << ")^((threadIdx.x & 7)<<3)));\n";
+          } else {
+            os << var << "+ ((" << index << "+ ((threadIdx.x & 16) >> 2) + (threadIdx.x & 15) * ";
+            this->PrintExpr(op->args[6], os);
+            os << ")^((threadIdx.x & 7)<<2)));\n";
+          }
+        } else {
+          if (op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)){
+            os << var << "+ ((" << index << "+ (threadIdx.x & 8) + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
+            this->PrintExpr(op->args[6], os);
+            os << ")^((threadIdx.x & 7)<<3)));\n";
+          } else {
+            os << var << "+ ((" << index << "+ ((threadIdx.x & 8)>>1) + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
+            this->PrintExpr(op->args[6], os);
+            os << ")^((threadIdx.x & 7)<<2)));\n";
+          }
+        }
       }
       PrintIndent(os, 0);
       os << "unsigned s_pointer_t = __nv_cvta_generic_to_shared_impl((void*) s_pointer); \n";
@@ -711,16 +799,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
         os << "asm volatile (\"ldmatrix.sync.aligned.m8n8.x4.shared.b16 ";
       }
       os << "{%0, %1, %2, %3}, [%4];\" : \"=r\"(a_int[0]), \"=r\"(a_int[1]), \"=r\"(a_int[2]), \"=r\"(a_int[3]): \"r\"(s_pointer_t))";
-    } else {
-      os << "nvcuda::wmma::load_matrix_sync(";
-      this->PrintExpr(op->args[0], os);
-      os << "[";
-      this->PrintExpr(op->args[4], os);
-      os << "], ";
-      this->PrintExpr(op->args[5], os);
-      os << ", ";
-      this->PrintExpr(op->args[6], os);
-      os << ")";
     }
     if (op->dtype == DataType::Float(32)){
       os << "; \n";

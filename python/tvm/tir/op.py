@@ -1227,6 +1227,10 @@ def indexmod(a, b, span=None):
     return _ffi_api._OpIndexMod(a, b, span)  # type: ignore
 
 
+def bitwise_xor(a, b, span=None):
+    return _ffi_api.bitwise_xor(a, b, span)
+
+
 def truncdiv(a, b, span=None):
     """Compute the truncdiv of two expressions.
 

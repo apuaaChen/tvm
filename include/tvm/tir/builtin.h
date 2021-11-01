@@ -513,6 +513,14 @@ TVM_DLL const Op& tvm_global_barrier_kinit();
  */
 TVM_DLL const Op& tvm_thread_allreduce();
 
+
+// Shared memory specific intrisic temporarily registered to CUDA.
+/*!
+ * \brief tvm intrinsic for shared memory load operators.
+ * void tvm_load_shared(Expr global_ptr, Expr shared_ptr, UintImm ldm) 
+ */
+TVM_DLL const Op& tvm_load_shared();
+
 // TODO(tvm-team) TensorCore specific intrinsics should be directly registered under
 //                cuda. namespace and used through op.
 /*!

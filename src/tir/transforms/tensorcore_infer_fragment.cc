@@ -58,7 +58,6 @@ class FragmentGetter : public StmtExprVisitor {
       // Get shape and layout information from load and store intrinsic
       if (op->op.same_as(builtin::tvm_load_matrix_sync())){
         ICHECK_GE(op->args.size(), 8U);
-        ICHECK_LE(op->args.size(), 9U);
       } else {
         ICHECK_EQ(op->args.size(), 8U);
       }
