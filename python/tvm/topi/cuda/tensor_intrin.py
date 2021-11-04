@@ -16,6 +16,7 @@
 # under the License.
 # pylint: disable=invalid-name, unnecessary-lambda, too-many-arguments
 """Tensor intrinsics on CUDA."""
+from os import name
 import tvm
 from tvm import te
 
@@ -82,7 +83,39 @@ def dp4a(x_scope="local", y_scope="local", z_scope="local"):
     )
 
 
-def intrin_wmma_load_matrix_A(strides_dst, strides_from, shape, layout, A_shape, C_shape, in_dtype):
+def intrin_load_shared(strides_dst, strides_from, shape, in_dtype, layout="linear", thread_extent=None):
+    A = te.placeholder(shape, name="A", dtype=in_dtype)
+    BA = tvm.tir.decl_buffer(
+        A.shape, A.dtype, scope="global", data_alignment=32, offset_factor=shape[1], strides=strides_from
+    )
+    C = te.compute(shape, lambda i, j: A[i, j], name="C")
+    BC = tvm.tir.decl_buffer(
+        C.shape, C.dtype, scope="shared", data_alignment=32, offset_factor=shape[1], strides=strides_dst
+    )
+
+    def intrin_func(ins, outs):
+        ib = tvm.tir.ir_builder.create()
+        if thread_extent is not None:
+            ib.scope_attr(thread_extent[0], "thread_extent", thread_extent[1])
+        BA = ins[0]
+        BC = outs[0]
+        ib.emit(
+            tvm.tir.call_intrin(
+                in_dtype,
+                "tir.tvm_load_shared",
+                BA.access_ptr("r"),
+                BC.access_ptr("w"),
+                strides_from[0],
+                strides_dst[0],
+                layout
+            )
+        )
+        return ib.get()
+    
+    return te.decl_tensor_intrin(C.op, intrin_func, binds={A: BA, C: BC})
+
+
+def intrin_wmma_load_matrix_A(strides_dst, strides_from, shape, layout, A_shape, C_shape, in_dtype, flags=[], thread_extent=None):
     """Intrin function for loading data from shared memory to wmma.matrix_a"""
     wmma_m, wmma_n, wmma_k = shape
 
@@ -102,31 +135,24 @@ def intrin_wmma_load_matrix_A(strides_dst, strides_from, shape, layout, A_shape,
 
     def intrin_func(ins, outs):
         ib = tvm.tir.ir_builder.create()
-
+        if thread_extent is not None:
+            ib.scope_attr(thread_extent[0], "thread_extent", thread_extent[1])
         BA = ins[0]
         BC = outs[0]
         row = wmma_m * wmma_k
         warp_index = BC.elem_offset // row + BC.elem_offset % row // wmma_k
+        intrin_args = [in_dtype, "tir.tvm_load_matrix_sync",
+            BC.data, wmma_m, wmma_n, wmma_k, warp_index,
+            BA.access_ptr("r"), strides_from[0], layout] + flags
         ib.emit(
-            tvm.tir.call_intrin(
-                "handle",
-                "tir.tvm_load_matrix_sync",
-                BC.data,
-                wmma_m,
-                wmma_n,
-                wmma_k,
-                warp_index,
-                BA.access_ptr("r"),
-                strides_from[0],
-                layout,
-            )
+            tvm.tir.call_intrin(*intrin_args)
         )
         return ib.get()
 
     return te.decl_tensor_intrin(C.op, intrin_func, binds={A: BA, C: BC})
 
 
-def intrin_wmma_load_matrix_W(strides_dst, strides_from, shape, layout, A_shape, C_shape, in_dtype):
+def intrin_wmma_load_matrix_W(strides_dst, strides_from, shape, layout, A_shape, C_shape, in_dtype, flags=[], thread_extent=None):
     """Intrin function for loading data from shared memory to wmma.matrix_b"""
     wmma_m, wmma_n, wmma_k = shape
 
@@ -146,31 +172,24 @@ def intrin_wmma_load_matrix_W(strides_dst, strides_from, shape, layout, A_shape,
 
     def intrin_func(ins, outs):
         ib = tvm.tir.ir_builder.create()
-
+        if thread_extent is not None:
+            ib.scope_attr(thread_extent[0], "thread_extent", thread_extent[1])
         BA = ins[0]
         BC = outs[0]
         row = wmma_n * wmma_k
         warp_index = BC.elem_offset // row + BC.elem_offset % row // wmma_n
+        intrin_args = [in_dtype, "tir.tvm_load_matrix_sync", 
+            BC.data, wmma_m, wmma_n, wmma_k, warp_index, 
+            BA.access_ptr("r"), strides_from[0], layout] + flags
         ib.emit(
-            tvm.tir.call_intrin(
-                "handle",
-                "tir.tvm_load_matrix_sync",
-                BC.data,
-                wmma_m,
-                wmma_n,
-                wmma_k,
-                warp_index,
-                BA.access_ptr("r"),
-                strides_from[0],
-                layout,
-            )
+            tvm.tir.call_intrin(*intrin_args)
         )
         return ib.get()
 
     return te.decl_tensor_intrin(C.op, intrin_func, binds={A: BA, C: BC})
 
 
-def intrin_wmma_store_matrix(strides_dst, strides_from, shape, out_dtype, A_shape, C_shape):
+def intrin_wmma_store_matrix(strides_dst, strides_from, shape, out_dtype, A_shape, C_shape, C_scope="shared"):
     """Intrin function for storing the results from wmma.accumulator to shared"""
     wmma_m, wmma_n, wmma_k = shape
     A = te.placeholder(A_shape, name="A", dtype=out_dtype)
@@ -184,7 +203,7 @@ def intrin_wmma_store_matrix(strides_dst, strides_from, shape, out_dtype, A_shap
     )
     C = te.compute(C_shape, lambda *i: A(*i), name="C")
     BC = tvm.tir.decl_buffer(
-        C.shape, C.dtype, scope="shared", strides=strides_dst, data_alignment=32, offset_factor=8
+        C.shape, C.dtype, scope=C_scope, strides=strides_dst, data_alignment=32, offset_factor=8
     )
 
     def intrin_func(ins, outs):
