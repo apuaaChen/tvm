@@ -710,6 +710,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::tvm_load_matrix_sync())) {
     need_mma_h_ = true;
     ICHECK_GE(op->args.size(), 8U);
+    std::stringstream scope;
+    this->PrintExpr(op->args[0], scope);
     /*
      * Case 1: no modifiers are provided. 
      *         The original "wmma::load_matrix_sync" is used
@@ -725,7 +727,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[6], os);
       os << ")";
     } else {
-      os << "float* s_pointer = reinterpret_cast<float* >(";
       /* 
        * Case 2: a single modifier is provided.
        *         When "xor" is set, the ldmatrix must also be set
@@ -734,79 +735,11 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       if ((op->args.size() == 9U) && 
           (op->args[8].as<StringImmNode>()->value == "ldmatrix")
       ){
-        this->PrintExpr(op->args[5], os);
-        if (op->args[7].as<StringImmNode>()->value == "row_major"){
-          os << "+ (threadIdx.x & 15) * ";
-          this->PrintExpr(op->args[6], os);
-          os << ") + ((threadIdx.x & 16) >>2)";
-          os << ";\n";
-        } else {
-          os << " + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
-          this->PrintExpr(op->args[6], os);
-          os << ") + ((threadIdx.x & 8)>>1);\n";
-        }
-      }
-      /*
-      * Case 3: two or more modifiers are provided.
-      *         This could be ldmatrix + xor
-      */
-      else if ((op->args.size() == 10U) &&
-              (op->args[8].as<StringImmNode>()->value == "ldmatrix") &&
-              (op->args[9].as<StringImmNode>()->value == "xor")
-      ){
-        std::stringstream shm_ptr;
-        this->PrintExpr(op->args[5].as<CallNode>()->args[0], shm_ptr);
-        int start = 0;
-        int end = 0;
-        for (size_t i=0; i < shm_ptr.str().length(); i++){
-          if (shm_ptr.str()[i] == '[') start = i+1;
-          if (shm_ptr.str()[i] == ']') {
-            end = i;
-            break;
-          }
-        }
-        std::string index = shm_ptr.str().substr(start, end - start);
-        std::string var = shm_ptr.str().substr(0, start-1);
-        if (op->args[7].as<StringImmNode>()->value == "row_major") {
-          if (op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)){
-            os << var << "+ ((" << index << "+ ((threadIdx.x & 16) >> 1) + (threadIdx.x & 15) * ";
-            this->PrintExpr(op->args[6], os);
-            os << ")^((threadIdx.x & 7)<<3)));\n";
-          } else {
-            os << var << "+ ((" << index << "+ ((threadIdx.x & 16) >> 2) + (threadIdx.x & 15) * ";
-            this->PrintExpr(op->args[6], os);
-            os << ")^((threadIdx.x & 7)<<2)));\n";
-          }
-        } else {
-          if (op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)){
-            os << var << "+ ((" << index << "+ (threadIdx.x & 8) + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
-            this->PrintExpr(op->args[6], os);
-            os << ")^((threadIdx.x & 7)<<3)));\n";
-          } else {
-            os << var << "+ ((" << index << "+ ((threadIdx.x & 8)>>1) + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
-            this->PrintExpr(op->args[6], os);
-            os << ")^((threadIdx.x & 7)<<2)));\n";
-          }
-        }
-      }
-      PrintIndent(os, 0);
-      os << "unsigned s_pointer_t = __nv_cvta_generic_to_shared_impl((void*) s_pointer); \n";
-      PrintIndent(os, 0);
-      os << "int* a_int = reinterpret_cast<int*>(";
-      this->PrintExpr(op->args[0], os);
-      os << "[";
-      this->PrintExpr(op->args[4], os);
-      os << "].x);\n";
-      PrintIndent(os, 0);
-
-      std::stringstream scope;
-      this->PrintExpr(op->args[0], scope);
-      if ((op->dtype == DataType::Float(32)) &&
-          (op->args[7].as<StringImmNode>()->value == "row_major") &&
-          (scope.str().find("matrix_b") != std::string::npos)){
-          if ((op->args.size() == 9U) && 
-          (op->args[8].as<StringImmNode>()->value == "ldmatrix")){
-            os << "s_pointer = ";
+        if ((op->dtype == DataType::Float(32)) && 
+            (op->args[7].as<StringImmNode>()->value == "row_major") &&
+            (scope.str().find("matrix_b") != std::string::npos))
+        {
+            os << "float* s_pointer = ";
             this->PrintExpr(op->args[5], os);
             os << "+ (threadIdx.x >> 2) + (threadIdx.x & 3) * ";
             this->PrintExpr(op->args[6], os);
@@ -838,55 +771,129 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
             os << "].x[3] = *(s_pointer + 8 + 4 * ";
             this->PrintExpr(op->args[6], os);
             os << ")";
+        } else {
+          os << "float* s_pointer = reinterpret_cast<float* >(";
+          this->PrintExpr(op->args[5], os);
+          if (op->args[7].as<StringImmNode>()->value == "row_major"){
+            os << "+ (threadIdx.x & 15) * ";
+            this->PrintExpr(op->args[6], os);
+            os << ") + ((threadIdx.x & 16) >>2)";
+            os << ";\n";
           } else {
-            std::stringstream shm_ptr_t;
-            this->PrintExpr(op->args[5].as<CallNode>()->args[0], shm_ptr_t);
-            int start_t = 0;
-            int end_t = 0;
-            for (size_t i=0; i < shm_ptr_t.str().length(); i++){
-              if (shm_ptr_t.str()[i] == '[') start_t = i+1;
-              if (shm_ptr_t.str()[i] == ']') {
-                end_t = i;
-                break;
-              }
-            }
-            std::string index_t = shm_ptr_t.str().substr(start_t, end_t - start_t);
-            std::string var_t = shm_ptr_t.str().substr(0, start_t-1);
-
-            os << "int offset = " << index_t;
-            os << "+ (threadIdx.x >> 2) + (threadIdx.x & 3) * ";
+            os << " + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
             this->PrintExpr(op->args[6], os);
-            os <<";\n";
-
-            PrintIndent(os, 0);
-            this->PrintExpr(op->args[0], os);
-            os << "[";
-            this->PrintExpr(op->args[4], os);
-            os << "].x[0] = *(" << var_t << " + (offset ^ ((threadIdx.x & 3) << 3)));\n";
-
-            PrintIndent(os, 0);
-            this->PrintExpr(op->args[0], os);
-            os << "[";
-            this->PrintExpr(op->args[4], os);
-            os << "].x[1] = *(" << var_t << " + 4 * ";
-            this->PrintExpr(op->args[6], os);
-            os << "+ (offset ^ ((threadIdx.x & 3) << 3)));\n";
-
-            PrintIndent(os, 0);
-            this->PrintExpr(op->args[0], os);
-            os << "[";
-            this->PrintExpr(op->args[4], os);
-            os << "].x[2] = *(" << var_t << " + ((offset + 8) ^ ((threadIdx.x & 3) << 3)));\n";
-
-            PrintIndent(os, 0);
-            this->PrintExpr(op->args[0], os);
-            os << "[";
-            this->PrintExpr(op->args[4], os);
-            os << "].x[3] = *(" << var_t << " + 4 * ";
-            this->PrintExpr(op->args[6], os);
-            os << "+ ((offset + 8) ^ ((threadIdx.x & 3) << 3)))";
+            os << ") + ((threadIdx.x & 8)>>1);\n";
           }
-      } else {
+        }
+      }
+      /*
+      * Case 3: two or more modifiers are provided.
+      *         This could be ldmatrix + xor
+      */
+      else if ((op->args.size() == 10U) &&
+              (op->args[8].as<StringImmNode>()->value == "ldmatrix") &&
+              (op->args[9].as<StringImmNode>()->value == "xor")
+      ){
+      if ((op->dtype == DataType::Float(32)) &&
+          (op->args[7].as<StringImmNode>()->value == "row_major") &&
+          (scope.str().find("matrix_b") != std::string::npos) && (op->args.size() == 10U)){
+          std::stringstream shm_ptr_t;
+          this->PrintExpr(op->args[5].as<CallNode>()->args[0], shm_ptr_t);
+          int start_t = 0;
+          int end_t = 0;
+          for (size_t i=0; i < shm_ptr_t.str().length(); i++){
+            if (shm_ptr_t.str()[i] == '[') start_t = i+1;
+            if (shm_ptr_t.str()[i] == ']') {
+              end_t = i;
+              break;
+            }
+          }
+          std::string index_t = shm_ptr_t.str().substr(start_t, end_t - start_t);
+          std::string var_t = shm_ptr_t.str().substr(0, start_t-1);
+
+          os << "int offset = " << index_t;
+          os << "+ (threadIdx.x >> 2) + (threadIdx.x & 3) * ";
+          this->PrintExpr(op->args[6], os);
+          os <<";\n";
+
+          PrintIndent(os, 0);
+          this->PrintExpr(op->args[0], os);
+          os << "[";
+          this->PrintExpr(op->args[4], os);
+          os << "].x[0] = *(" << var_t << " + (offset ^ ((threadIdx.x & 3) << 3)));\n";
+
+          PrintIndent(os, 0);
+          this->PrintExpr(op->args[0], os);
+          os << "[";
+          this->PrintExpr(op->args[4], os);
+          os << "].x[1] = *(" << var_t << " + 4 * ";
+          this->PrintExpr(op->args[6], os);
+          os << "+ (offset ^ ((threadIdx.x & 3) << 3)));\n";
+
+          PrintIndent(os, 0);
+          this->PrintExpr(op->args[0], os);
+          os << "[";
+          this->PrintExpr(op->args[4], os);
+          os << "].x[2] = *(" << var_t << " + ((offset + 8) ^ ((threadIdx.x & 3) << 3)));\n";
+
+          PrintIndent(os, 0);
+          this->PrintExpr(op->args[0], os);
+          os << "[";
+          this->PrintExpr(op->args[4], os);
+          os << "].x[3] = *(" << var_t << " + 4 * ";
+          this->PrintExpr(op->args[6], os);
+          os << "+ ((offset + 8) ^ ((threadIdx.x & 3) << 3)))";
+        } else {
+          os << "float* s_pointer = reinterpret_cast<float* >(";
+          std::stringstream shm_ptr;
+          this->PrintExpr(op->args[5].as<CallNode>()->args[0], shm_ptr);
+          int start = 0;
+          int end = 0;
+          for (size_t i=0; i < shm_ptr.str().length(); i++){
+            if (shm_ptr.str()[i] == '[') start = i+1;
+            if (shm_ptr.str()[i] == ']') {
+              end = i;
+              break;
+            }
+          }
+          std::string index = shm_ptr.str().substr(start, end - start);
+          std::string var = shm_ptr.str().substr(0, start-1);
+          if (op->args[7].as<StringImmNode>()->value == "row_major") {
+            if (op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)){
+              os << var << "+ ((" << index << "+ ((threadIdx.x & 16) >> 1) + (threadIdx.x & 15) * ";
+              this->PrintExpr(op->args[6], os);
+              os << ")^((threadIdx.x & 7)<<3)));\n";
+            } else {
+              os << var << "+ ((" << index << "+ ((threadIdx.x & 16) >> 2) + (threadIdx.x & 15) * ";
+              this->PrintExpr(op->args[6], os);
+              os << ")^((threadIdx.x & 7)<<2)));\n";
+            }
+          } else {
+            if (op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)){
+              os << var << "+ ((" << index << "+ (threadIdx.x & 8) + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
+              this->PrintExpr(op->args[6], os);
+              os << ")^((threadIdx.x & 7)<<3)));\n";
+            } else {
+              os << var << "+ ((" << index << "+ ((threadIdx.x & 8)>>1) + ((threadIdx.x & 7) + ((threadIdx.x & 16)>>1)) * ";
+              this->PrintExpr(op->args[6], os);
+              os << ")^((threadIdx.x & 7)<<2)));\n";
+            }
+          }
+        }
+      }
+      if (!((op->dtype == DataType::Float(32)) && 
+            (op->args[7].as<StringImmNode>()->value == "row_major") &&
+            (scope.str().find("matrix_b") != std::string::npos)))
+      {
+        PrintIndent(os, 0);
+        os << "unsigned s_pointer_t = __nv_cvta_generic_to_shared_impl((void*) s_pointer); \n";
+        PrintIndent(os, 0);
+        os << "int* a_int = reinterpret_cast<int*>(";
+        this->PrintExpr(op->args[0], os);
+        os << "[";
+        this->PrintExpr(op->args[4], os);
+        os << "].x);\n";
+        PrintIndent(os, 0);
         if ((op->dtype == DataType::Float(16) || op->dtype == DataType::BFloat(16)) && 
             (op->args[7].as<StringImmNode>()->value == "row_major") &&
             (scope.str().find("matrix_b") != std::string::npos)){
